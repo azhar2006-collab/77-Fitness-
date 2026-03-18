@@ -3043,6 +3043,158 @@ document.addEventListener('keydown', (e) => {
       }, { passive: true });
     })();
 
+/* ══════════════════════════════════════════════════════════
+   PRICE CARD BIDIRECTIONAL ANIMATION — FIRES EVERY SCROLL
+   
+   Logic: on every scroll event we check each card's
+   bounding rect relative to the viewport:
+
+   • rect.top  > vh * 0.88  → card is below  → show "below" state
+   • rect.bottom < vh * 0.1  → card is above  → show "above" state
+   • otherwise               → card is visible → show "in" state
+
+   This fires on EVERY pixel of scrolling in both directions,
+   so the animation replays every single time you scroll
+   up or down past the cards — not just once.
+══════════════════════════════════════════════════════════ */
+(function () {
+  const cards   = ['pc1','pc2','pc3'].map(id => document.getElementById(id));
+  const STAGGER  = [0, 140, 280]; // ms per card
+  const OFFSET   = 0.88;          // card enters when its top reaches 88% from top of viewport
+  const EXIT_TOP = 0.30;          // card exits top when bottom < 30% — keeps upward animation visible
+
+  /* Timers to handle stagger without overlapping */
+  const timers = [null, null, null];
+
+  /* Per-card state: 'below' | 'in' | 'above' */
+  const state = ['below', 'below', 'below'];
+
+  function setCardState(idx, newState) {
+    const card = cards[idx];
+    const prev = state[idx];
+
+    /* Always re-trigger when entering 'in'. Skip only identical non-in states. */
+    if (prev === newState && newState !== 'in') return;
+    state[idx] = newState;
+
+    const delay = newState === 'in' ? STAGGER[idx] : 0;
+    clearTimeout(timers[idx]);
+
+    /* Strip all state classes immediately to reset the CSS transition */
+    card.classList.remove('pc-in', 'pc-above');
+
+    if (newState !== 'below') {
+      timers[idx] = setTimeout(() => {
+        /* Remove again + force repaint so transition fires fresh every time */
+        card.classList.remove('pc-in', 'pc-above');
+        void card.offsetWidth;
+        if (newState === 'in')    card.classList.add('pc-in');
+        if (newState === 'above') card.classList.add('pc-above');
+      }, delay);
+    }
+    /* 'below' = no class → CSS default (translateY(70px) invisible) */
+  }
+
+  function checkCards() {
+    const vh = innerHeight;
+    cards.forEach((card, idx) => {
+      const rect = card.getBoundingClientRect();
+
+      if (rect.bottom < vh * EXIT_TOP) {
+        /* Card has scrolled above viewport */
+        setCardState(idx, 'above');
+      } else if (rect.top > vh * OFFSET) {
+        /* Card is below viewport — reset so animation re-fires next entry */
+        setCardState(idx, 'below');
+      } else {
+        /* Card is visible — plays the full slide-in animation every time */
+        setCardState(idx, 'in');
+      }
+    });
+  }
+
+  /* Run on every scroll — rAF-throttled for smoothness */
+  let ticking = false;
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      requestAnimationFrame(() => { checkCards(); ticking = false; });
+      ticking = true;
+    }
+  }, { passive: true });
+
+  /* Also run once on load in case cards are already visible */
+  checkCards();
+})();
+
+/* ══════════════════════════════════════
+   PRICE COUNT-DOWN ANIMATION
+   Counts from 50,000 → actual price.
+   Re-fires EVERY time pricing section
+   enters the viewport (scroll up or down).
+══════════════════════════════════════ */
+(function(){
+  const targets = [
+    { el: document.getElementById('pv1'), val: 6999  },
+    { el: document.getElementById('pv2'), val: 21999 },
+    { el: document.getElementById('pv3'), val: 26999 }
+  ];
+  const FROM    = 50000;
+  const DURATION = 4400; // ms
+  const STAGGER  = 180;  // ms between each card
+
+  const fmt = n => n.toLocaleString('en-IN');
+  let running = false;
+  let timers  = [];
+
+  function runCounter() {
+    if (running) return;
+    running = true;
+
+    /* Cancel any in-progress animations */
+    timers.forEach(t => cancelAnimationFrame(t));
+    timers = [];
+
+    targets.forEach(({ el, val }, i) => {
+      setTimeout(() => {
+        el.style.color = 'var(--red)';
+        const start = performance.now();
+        function step(now) {
+          const t = Math.min((now - start) / DURATION, 1);
+          /* Ease-out-expo */
+          const e = t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+          el.textContent = fmt(Math.round(FROM + (val - FROM) * e));
+          if (t < 1) {
+            timers[i] = requestAnimationFrame(step);
+          } else {
+            el.textContent = fmt(val);
+            el.style.color  = '';
+          }
+        }
+        timers[i] = requestAnimationFrame(step);
+      }, i * STAGGER);
+    });
+
+    /* Allow re-trigger once animation finishes */
+    setTimeout(() => { running = false; }, DURATION + targets.length * STAGGER + 200);
+  }
+
+  /* Watch pricing section — fires every time it enters viewport */
+  const section = document.getElementById('pricing');
+  let inView = false;
+
+  window.addEventListener('scroll', () => {
+    const rect = section.getBoundingClientRect();
+    const visible = rect.top < window.innerHeight * 0.75 && rect.bottom > 0;
+    if (visible && !inView) {
+      inView = true;
+      runCounter();
+    }
+    if (!visible) {
+      inView = false; /* Reset so next entry re-fires */
+    }
+  }, { passive: true });
+})();
+
  /* PICK PLAN + OFFER CHECKBOX (same behavior style as index1.html, simplified) */
 let activePlan = null;
 let offerApplied = false;
